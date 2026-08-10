@@ -1,16 +1,17 @@
 const { GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel } = require('discord.js');
-const { isValidFutureDate } = require('../utils/validators');
+const { isValidFutureTimestamp } = require('../utils/validators');
 
 /**
  * Create a Discord scheduled event for a session.
  * Returns the event ID or null if date is not valid.
  */
 async function createDiscordEvent(guild, session) {
-  if (!isValidFutureDate(session.date)) {
+  if (!isValidFutureTimestamp(session.date_timestamp)) {
     return null;
   }
 
-  const startDate = new Date(session.date);
+  // Convert Unix timestamp to Date object
+  const startDate = new Date(session.date_timestamp * 1000);
   if (isNaN(startDate.getTime()) || startDate <= new Date()) {
     return null;
   }
@@ -48,9 +49,10 @@ async function updateDiscordEvent(guild, eventId, session) {
       description: buildEventDescription(session),
     };
 
-    if (isValidFutureDate(session.date)) {
-      updates.scheduledStartTime = new Date(session.date);
-      updates.scheduledEndTime = new Date(new Date(session.date).getTime() + 4 * 60 * 60 * 1000);
+    if (isValidFutureTimestamp(session.date_timestamp)) {
+      const startDate = new Date(session.date_timestamp * 1000);
+      updates.scheduledStartTime = startDate;
+      updates.scheduledEndTime = new Date(startDate.getTime() + 4 * 60 * 60 * 1000);
     }
 
     if (session.platform) {

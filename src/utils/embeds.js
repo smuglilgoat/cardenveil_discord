@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { t } = require('./i18n');
+const { formatDiscordTimestamp } = require('./validators');
 const db = require('../database');
 
 /**
@@ -15,6 +16,11 @@ function buildSessionEmbed(session) {
   const playerList = confirmedPlayers.map(p => `<@${p.user_id}>`).join(' ') || '—';
   const waitlistList = waitlistPlayers.map(p => `<@${p.user_id}>`).join(' ') || '';
 
+  // Format date using Discord timestamps
+  const dateDisplay = session.date_timestamp 
+    ? `${formatDiscordTimestamp(session.date_timestamp, 'F')} (${formatDiscordTimestamp(session.date_timestamp, 'R')})`
+    : (session.date_text || 'À définir');
+
   const embed = new EmbedBuilder()
     .setColor(getStatusColor(session.status))
     .setDescription(session.description || '—')
@@ -22,7 +28,7 @@ function buildSessionEmbed(session) {
       { name: t('embed_mj'), value: `<@${session.mj_id}>`, inline: true },
       { name: t('embed_system'), value: session.system || '—', inline: true },
       { name: t('embed_format'), value: session.format || '—', inline: true },
-      { name: t('embed_date'), value: session.date || 'À définir', inline: true },
+      { name: t('embed_date'), value: dateDisplay, inline: true },
       { name: t('embed_duration'), value: session.duration || '—', inline: true },
       { name: t('embed_type'), value: session.type || '—', inline: true },
       { name: t('embed_level'), value: session.level || '—', inline: true },
@@ -76,9 +82,14 @@ function buildCalendarEmbed(sessions) {
     const tags = typeof session.tags === 'string' ? session.tags : JSON.parse(session.tags || '[]');
     const tagsStr = Array.isArray(tags) ? tags.join(' ') : '';
 
+    // Format date using Discord timestamps
+    const dateDisplay = session.date_timestamp 
+      ? formatDiscordTimestamp(session.date_timestamp, 'f')
+      : (session.date_text || 'À définir');
+
     const value = [
       `${t('embed_format')}: ${session.format || '—'}`,
-      `${t('embed_date')}: ${session.date || 'À définir'}`,
+      `${t('embed_date')}: ${dateDisplay}`,
       `${t('embed_duration')}: ${session.duration || '—'}`,
       `${t('embed_level')}: ${session.level || '—'}`,
       `${t('embed_platform')}: ${session.platform || '—'}`,

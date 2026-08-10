@@ -10,6 +10,10 @@ const translations = {
     session_already_full: '❌ Cette session est complète.',
     session_status_updated: '✅ Statut de la session mis à jour.',
 
+    // Session edit
+    session_edit_title: 'Modifier la Session',
+    session_edited: '✅ Session #{id} modifiée avec succès !',
+
     // Modal fields
     field_mj: 'MJ (mention Discord)',
     field_system: 'Système',
@@ -23,6 +27,7 @@ const translations = {
     field_tags: 'Tags (séparés par des espaces, ex: #Stratégique #Goofy)',
     field_game_type: 'Type de partie',
     field_max_players: 'Nombre max de joueurs',
+    field_status: 'Statut',
     field_description: 'Description',
     field_comments: 'Commentaires (optionnel)',
 
@@ -98,6 +103,10 @@ const translations = {
     session_already_full: '❌ This session is full.',
     session_status_updated: '✅ Session status updated.',
 
+    // Session edit
+    session_edit_title: 'Edit Session',
+    session_edited: '✅ Session #{id} edited successfully!',
+
     // Modal fields
     field_mj: 'GM (Discord mention)',
     field_system: 'System',
@@ -111,6 +120,7 @@ const translations = {
     field_tags: 'Tags (space-separated, e.g. #Strategic #Goofy)',
     field_game_type: 'Game type',
     field_max_players: 'Max players',
+    field_status: 'Status',
     field_description: 'Description',
     field_comments: 'Comments (optional)',
 

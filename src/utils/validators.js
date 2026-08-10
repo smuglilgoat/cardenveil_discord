@@ -1,24 +1,154 @@
 /**
- * Parse a date string into a Discord timestamp or ISO string.
- * Supports French date formats and "à définir" / "a definir" as null.
+ * Parse a date string into a Unix timestamp (seconds since epoch).
+ * Supports various formats including French dates and ISO format.
+ * Returns null if the date is invalid or "à définir".
  */
-function parseDate(dateStr) {
+function parseDateToTimestamp(dateStr) {
   if (!dateStr || dateStr.trim() === '') return null;
+  
   const lower = dateStr.toLowerCase().trim();
+  
+  // Check for "à définir" or similar
   if (lower.includes('définir') || lower.includes('definir') || lower === 'à définir' || lower === 'a definir') {
     return null;
   }
-  return dateStr.trim();
+  
+  // Try various parsing methods
+  let date = null;
+  
+  // Try ISO format first: 2024-06-13 14:00 or 2024-06-13T14:00:00
+  date = tryParseISO(dateStr);
+  
+  // Try French format: Samedi 13 Juin 2024 14:00
+  if (!date) {
+    date = tryParseFrench(dateStr);
+  }
+  
+  // Try European format: 13/06/2024 14:00
+  if (!date) {
+    date = tryParseEuropean(dateStr);
+  }
+  
+  // Try US format: 06/13/2024 14:00
+  if (!date) {
+    date = tryParseUS(dateStr);
+  }
+  
+  if (!date || isNaN(date.getTime())) {
+    return null;
+  }
+  
+  // Convert to Unix timestamp (seconds)
+  return Math.floor(date.getTime() / 1000);
+}
+
+function tryParseISO(dateStr) {
+  // Match: 2024-06-13 14:00 or 2024-06-13T14:00:00
+  const isoRegex = /^(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/;
+  const match = dateStr.match(isoRegex);
+  
+  if (match) {
+    const [, year, month, day, hour, minute, second] = match;
+    return new Date(
+      parseInt(year),
+      parseInt(month) - 1,
+      parseInt(day),
+      parseInt(hour),
+      parseInt(minute),
+      parseInt(second || 0)
+    );
+  }
+  
+  return null;
+}
+
+function tryParseFrench(dateStr) {
+  // Match: Samedi 13 Juin 2024 14:00 or 13 Juin 2024 14:00
+  const months = {
+    'janvier': 0, 'février': 1, 'mars': 2, 'avril': 3,
+    'mai': 4, 'juin': 5, 'juillet': 6, 'août': 7,
+    'septembre': 8, 'octobre': 9, 'novembre': 10, 'décembre': 11
+  };
+  
+  const frenchRegex = /(\d{1,2})\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\s*(\d{4})?\s*(\d{1,2}):(\d{2})?/i;
+  const match = dateStr.match(frenchRegex);
+  
+  if (match) {
+    const [, day, monthName, year, hour, minute] = match;
+    const month = months[monthName.toLowerCase()];
+    const fullYear = year ? parseInt(year) : new Date().getFullYear();
+    
+    return new Date(
+      fullYear,
+      month,
+      parseInt(day),
+      parseInt(hour || 0),
+      parseInt(minute || 0)
+    );
+  }
+  
+  return null;
+}
+
+function tryParseEuropean(dateStr) {
+  // Match: 13/06/2024 14:00 or 13-06-2024 14:00
+  const euroRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*(\d{1,2}):(\d{2})?/;
+  const match = dateStr.match(euroRegex);
+  
+  if (match) {
+    const [, day, month, year, hour, minute] = match;
+    return new Date(
+      parseInt(year),
+      parseInt(month) - 1,
+      parseInt(day),
+      parseInt(hour || 0),
+      parseInt(minute || 0)
+    );
+  }
+  
+  return null;
+}
+
+function tryParseUS(dateStr) {
+  // Match: 06/13/2024 14:00 (month first)
+  const usRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s*(\d{1,2}):(\d{2})?/;
+  const match = dateStr.match(usRegex);
+  
+  if (match) {
+    const [, month, day, year, hour, minute] = match;
+    // Only use this if month <= 12 and day > 12 (to distinguish from European)
+    if (parseInt(month) <= 12 && parseInt(day) > 12) {
+      return new Date(
+        parseInt(year),
+        parseInt(month) - 1,
+        parseInt(day),
+        parseInt(hour || 0),
+        parseInt(minute || 0)
+      );
+    }
+  }
+  
+  return null;
 }
 
 /**
- * Check if a date string is a valid future date (for Discord event creation).
+ * Check if a Unix timestamp represents a valid future date.
  */
-function isValidFutureDate(dateStr) {
-  if (!dateStr) return false;
-  const parsed = new Date(dateStr);
-  if (isNaN(parsed.getTime())) return false;
-  return parsed > new Date();
+function isValidFutureTimestamp(timestamp) {
+  if (!timestamp) return false;
+  const now = Math.floor(Date.now() / 1000);
+  return timestamp > now;
+}
+
+/**
+ * Convert Unix timestamp to Discord timestamp format.
+ * @param {number} timestamp - Unix timestamp in seconds
+ * @param {string} style - Discord timestamp style (t, T, d, D, f, F, R)
+ * @returns {string} Discord timestamp string
+ */
+function formatDiscordTimestamp(timestamp, style = 'f') {
+  if (!timestamp) return 'À définir';
+  return `<t:${timestamp}:${style}>`;
 }
 
 /**
@@ -73,8 +203,9 @@ function normalizeStatus(status) {
 }
 
 module.exports = {
-  parseDate,
-  isValidFutureDate,
+  parseDateToTimestamp,
+  isValidFutureTimestamp,
+  formatDiscordTimestamp,
   parseMaxPlayers,
   parseTags,
   extractUserId,

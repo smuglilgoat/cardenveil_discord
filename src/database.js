@@ -26,7 +26,8 @@ function initSchema() {
       mj_id TEXT NOT NULL,
       system TEXT,
       format TEXT,
-      date TEXT,
+      date_timestamp INTEGER,
+      date_text TEXT,
       duration TEXT,
       type TEXT,
       level TEXT,
@@ -57,13 +58,14 @@ function initSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER NOT NULL,
       reminder_type TEXT NOT NULL,
-      scheduled_at DATETIME NOT NULL,
-      sent_at DATETIME,
+      scheduled_at INTEGER NOT NULL,
+      sent_at INTEGER,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_registrations_session ON registrations(session_id);
     CREATE INDEX IF NOT EXISTS idx_registrations_user ON registrations(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(date_timestamp);
     CREATE INDEX IF NOT EXISTS idx_reminders_scheduled ON reminders(scheduled_at, sent_at);
   `);
 }
@@ -73,10 +75,10 @@ function initSchema() {
 function createSession(data) {
   const stmt = getDb().prepare(`
     INSERT INTO sessions (
-      mj_id, system, format, date, duration, type, level, platform,
+      mj_id, system, format, date_timestamp, date_text, duration, type, level, platform,
       warnings, tags, game_type, max_players, status, description, comments
     ) VALUES (
-      @mj_id, @system, @format, @date, @duration, @type, @level, @platform,
+      @mj_id, @system, @format, @date_timestamp, @date_text, @duration, @type, @level, @platform,
       @warnings, @tags, @game_type, @max_players, @status, @description, @comments
     )
   `);
@@ -101,8 +103,8 @@ function getUpcomingSessions() {
     SELECT * FROM sessions
     WHERE status NOT IN ('fini', 'cancelled')
     ORDER BY
-      CASE WHEN date IS NULL OR date = '' OR date LIKE '%définir%' OR date LIKE '%définir%' THEN 1 ELSE 0 END,
-      date ASC
+      CASE WHEN date_timestamp IS NULL THEN 1 ELSE 0 END,
+      date_timestamp ASC
   `).all();
 }
 
@@ -110,7 +112,7 @@ function getSessionsForReminders() {
   return getDb().prepare(`
     SELECT * FROM sessions
     WHERE status NOT IN ('fini', 'cancelled')
-    AND date IS NOT NULL AND date != '' AND date NOT LIKE '%définir%'
+    AND date_timestamp IS NOT NULL
   `).all();
 }
 
@@ -211,18 +213,20 @@ function createReminder(sessionId, type, scheduledAt) {
 }
 
 function getPendingReminders() {
+  const now = Math.floor(Date.now() / 1000);
   return getDb().prepare(`
     SELECT r.*, s.* FROM reminders r
     JOIN sessions s ON r.session_id = s.id
     WHERE r.sent_at IS NULL
-    AND r.scheduled_at <= datetime('now')
-  `).all();
+    AND r.scheduled_at <= ?
+  `).all(now);
 }
 
 function markReminderSent(id) {
+  const now = Math.floor(Date.now() / 1000);
   getDb().prepare(
-    "UPDATE reminders SET sent_at = datetime('now') WHERE id = ?"
-  ).run(id);
+    'UPDATE reminders SET sent_at = ? WHERE id = ?'
+  ).run(now, id);
 }
 
 function deleteRemindersForSession(sessionId) {

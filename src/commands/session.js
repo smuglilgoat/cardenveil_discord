@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { t } = require('../utils/i18n');
 const { buildCalendarEmbed } = require('../utils/embeds');
 const { buildSessionCreateModal } = require('../components/modals/sessionCreate');
+const { buildSessionEditModal } = require('../components/modals/sessionEdit');
 const db = require('../database');
 const { normalizeStatus } = require('../utils/validators');
 const { editAnnouncement } = require('../services/announcement');
@@ -16,6 +17,15 @@ module.exports = {
     .addSubcommand(sub =>
       sub.setName('create')
         .setDescription('Créer une nouvelle session')
+    )
+    .addSubcommand(sub =>
+      sub.setName('edit')
+        .setDescription('Modifier une session (MJ uniquement)')
+        .addIntegerOption(opt =>
+          opt.setName('id')
+            .setDescription('ID de la session')
+            .setRequired(true)
+        )
     )
     .addSubcommand(sub =>
       sub.setName('list')
@@ -67,6 +77,7 @@ module.exports = {
 
     switch (sub) {
       case 'create': return handleCreate(interaction);
+      case 'edit': return handleEdit(interaction);
       case 'list': return handleList(interaction);
       case 'info': return handleInfo(interaction);
       case 'status': return handleStatus(interaction);
@@ -85,6 +96,26 @@ async function handleCreate(interaction) {
   }
 
   const modal = buildSessionCreateModal();
+  await interaction.showModal(modal);
+}
+
+// ─── /session edit ─────────────────────────────────────────────────
+
+async function handleEdit(interaction) {
+  // Check MJ role
+  const mjRole = interaction.guild.roles.cache.find(r => r.name === config.mjRoleName);
+  if (!mjRole || !interaction.member.roles.cache.has(mjRole.id)) {
+    return interaction.reply({ content: t('mj_only'), ephemeral: true });
+  }
+
+  const sessionId = interaction.options.getInteger('id');
+  const session = db.getSessionById(sessionId);
+
+  if (!session) {
+    return interaction.reply({ content: t('session_not_found'), ephemeral: true });
+  }
+
+  const modal = buildSessionEditModal(session);
   await interaction.showModal(modal);
 }
 

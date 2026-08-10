@@ -45,7 +45,7 @@ function buildSessionCreateModal() {
   const dateInput = new TextInputBuilder()
     .setCustomId('date')
     .setLabel(t('field_date'))
-    .setPlaceholder('Samedi 13 Juin / À définir')
+    .setPlaceholder('2024-06-13 14:00 ou Samedi 13 Juin 2024 14:00')
     .setStyle(TextInputStyle.Short)
     .setRequired(true);
 

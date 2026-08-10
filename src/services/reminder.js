@@ -20,30 +20,31 @@ function initReminders(discordClient) {
 }
 
 /**
- * Schedule reminders for a session based on its date.
+ * Schedule reminders for a session based on its Unix timestamp.
+ * @param {number} sessionId - Session ID
+ * @param {number} dateTimestamp - Unix timestamp in seconds
  */
-function scheduleReminders(sessionId, dateStr) {
-  if (!dateStr) return;
-
-  const sessionDate = new Date(dateStr);
-  if (isNaN(sessionDate.getTime())) return;
+function scheduleReminders(sessionId, dateTimestamp) {
+  if (!dateTimestamp) return;
 
   // Delete existing reminders for this session
   db.deleteRemindersForSession(sessionId);
 
+  const now = Math.floor(Date.now() / 1000);
+
   // 24h before
   if (config.reminders.reminder24h) {
-    const reminder24h = new Date(sessionDate.getTime() - 24 * 60 * 60 * 1000);
-    if (reminder24h > new Date()) {
-      db.createReminder(sessionId, '24h', reminder24h.toISOString());
+    const reminder24h = dateTimestamp - (24 * 60 * 60);
+    if (reminder24h > now) {
+      db.createReminder(sessionId, '24h', reminder24h);
     }
   }
 
   // 1h before
   if (config.reminders.reminder1h) {
-    const reminder1h = new Date(sessionDate.getTime() - 60 * 60 * 1000);
-    if (reminder1h > new Date()) {
-      db.createReminder(sessionId, '1h', reminder1h.toISOString());
+    const reminder1h = dateTimestamp - (60 * 60);
+    if (reminder1h > now) {
+      db.createReminder(sessionId, '1h', reminder1h);
     }
   }
 }
@@ -96,7 +97,7 @@ async function sendReminder(reminder) {
       const channel = await client.channels.fetch(session.announcement_channel_id);
       const mentions = confirmedPlayers.map(p => `<@${p.user_id}>`).join(' ');
       await channel.send(
-        `${t(channelKey)}\n${mentions}\n🎲 **${title}** — ${session.date || ''}`
+        `${t(channelKey)}\n${mentions}\n🎲 **${title}**`
       );
     } catch (err) {
       console.error('Failed to send channel reminder:', err);
