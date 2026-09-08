@@ -4,7 +4,8 @@ import { t } from '../../src/i18n.js';
 // Discord Interactions endpoint. Set as the bot's
 // "Interactions Endpoint URL" in the Developer Portal.
 
-export async function handler(request) {
+// v2 format: the default export receives a Web API Request.
+export default async function handler(request) {
   const body = await request.text();
 
   const signature = request.headers.get('x-signature-ed25519');
