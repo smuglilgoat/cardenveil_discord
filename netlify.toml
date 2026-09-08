@@ -1,0 +1,7 @@
+[build]
+  command = "echo 'no build step'"
+  functions = "netlify/functions"
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"

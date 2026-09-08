@@ -1,123 +1,59 @@
-# Quick Start Guide
+# Quick Start — Netlify + Supabase
 
-## Étape 1: Configuration Discord
+The bot runs as **Discord HTTP interactions** on Netlify Functions, with data in
+Supabase Postgres. No server to keep alive; reminders run on a Netlify cron
+(every 5 min).
 
-1. **Créer une application Discord**
-   - Allez sur https://discord.com/developers/applications
-   - Cliquez sur "New Application"
-   - Nommez-la "Cardenveil Bot"
+## 1. Supabase
 
-2. **Créer le bot**
-   - Onglet "Bot" → "Add Bot"
-   - Copiez le **Token** (gardez-le secret!)
+1. Create a project at https://supabase.com
+2. Open **SQL Editor** → paste `supabase/schema.sql` → **Run**
+3. **Project Settings → Database → Connection string → URI**, pick the
+   **Transaction pooler** (port 6543) version and copy it → this is `DATABASE_URL`
 
-3. **Récupérer les IDs**
-   - Activez le mode développeur: Paramètres Discord → Avancé → Mode développeur
-   - **CLIENT_ID**: Onglet "General Information" de votre application
-   - **GUILD_ID**: Clic droit sur votre serveur → "Copier l'ID"
-   - **ANNOUNCEMENT_CHANNEL_ID**: Clic droit sur #rp-orga → "Copier l'ID"
+## 2. Discord Developer Portal
 
-4. **Inviter le bot**
-   - Onglet "OAuth2" → "URL Generator"
-   - Scopes: ✅ `bot`, ✅ `applications.commands`
-   - Permissions bot:
-     - ✅ Send Messages
-     - ✅ Embed Links
-     - ✅ Read Message History
-     - ✅ Manage Events
-     - ✅ Create Public/Private Threads
-   - Copiez l'URL et ouvrez-la dans votre navigateur
+1. https://discord.com/developers/applications → your application
+2. **Bot** tab → **Reset Token** → copy → `DISCORD_TOKEN` (secret — keep it out of chat)
+3. **General Information** → copy **Application ID** and **Public Key**
+4. **OAuth2 → URL Generator** → scopes: `bot` + `applications.commands` →
+   permissions: Send Messages, Embed Links, Read Message History, **Manage Events**
+   → open the URL to invite the bot to your server
+5. In your Discord app: enable **Developer Mode**, then right-click your server →
+   Copy Server ID (`DISCORD_GUILD_ID`) and your announcement channel →
+   Copy Channel ID (`ANNOUNCEMENT_CHANNEL_ID`)
+6. Create a role named exactly like `MJ_ROLE_NAME` (default `MJ`) and give it to MJs
 
-## Étape 2: Configuration locale
+## 3. Netlify
 
-```bash
-# Copier le fichier d'exemple
-cp .env.example .env
+1. Push this repo to GitHub, then "Add new site → Import an existing project" on
+   https://app.netlify.com (config comes from `netlify.toml`)
+2. **Site configuration → Environment variables** — add all vars from
+   `.env.example` (same names)
+3. Deploy, then copy your site URL
+4. Back in the Developer Portal → your app → **Interactions Endpoint URL**:
+   `https://YOUR-SITE.netlify.app/.netlify/functions/interactions`
+   (saving triggers a PING that must succeed, so deploy before this step)
 
-# Éditer .env avec vos valeurs
-nano .env  # ou votre éditeur préféré
-```
-
-Remplissez:
-```env
-DISCORD_TOKEN=votre_token_ici
-CLIENT_ID=votre_client_id
-GUILD_ID=votre_guild_id
-ANNOUNCEMENT_CHANNEL_ID=votre_channel_id
-MJ_ROLE_NAME=MJ
-LANGUAGE=fr
-```
-
-## Étape 3: Installation
+## 4. Register slash commands (local machine)
 
 ```bash
-# Installer les dépendances
+cp .env.example .env      # fill DISCORD_TOKEN, IDs and DATABASE_URL
 npm install
-
-# Déployer les commandes Discord
-npm run deploy-commands
-
-# Lancer le bot
-npm start
+npm run deploy-commands   # instant because DISCORD_GUILD_ID is set
 ```
 
-## Étape 4: Tester
+## 5. Test
 
-Dans votre serveur Discord:
+- `/session list` → "Aucune session planifiée" ✅
+- `/session create` (as MJ) → 5-field form → announcement + Discord event appear
+- 📝 / ❌ buttons on the announcement, `/register my-sessions`
+- `/mj remind <id> <hours>`, `/session edit <id>`
 
-1. Tapez `/session create`
-2. Remplissez le formulaire
-3. Vérifiez que l'annonce apparaît dans #rp-orga
-4. Testez l'inscription avec les boutons
+Netlify's scheduled function `reminders` sends 24h/1h reminders automatically.
 
-## Étape 5: Déploiement Railway
+## Commandes
 
-```bash
-# Installer Railway CLI
-npm install -g @railway/cli
-
-# Se connecter
-railway login
-
-# Initialiser le projet
-railway init
-
-# Configurer les variables
-railway variables set DISCORD_TOKEN=votre_token
-railway variables set CLIENT_ID=votre_client_id
-railway variables set GUILD_ID=votre_guild_id
-railway variables set ANNOUNCEMENT_CHANNEL_ID=votre_channel_id
-railway variables set MJ_ROLE_NAME=MJ
-railway variables set LANGUAGE=fr
-
-# Déployer
-railway up
-
-# Voir les logs
-railway logs
-```
-
-## Commandes principales
-
-- `/session create` - Créer une session (MJ uniquement)
-- `/session list` - Voir toutes les sessions
-- `/register join <id>` - S'inscrire à une session
-- `/session status <id> pret` - Marquer comme prêt (MJ)
-
-## Problèmes courants
-
-**Bot ne répond pas aux commandes:**
-- Vérifiez que vous avez exécuté `npm run deploy-commands`
-- Attendez quelques minutes (les commandes globales prennent ~1h)
-
-**Erreur "Missing Permissions":**
-- Vérifiez que le bot a les permissions nécessaires dans le serveur
-- Vérifiez que le rôle MJ existe et que vous l'avez
-
-**Événement Discord non créé:**
-- Vérifiez que la date est valide (format: "Samedi 13 Juin 2024" ou ISO)
-- Vérifiez que le bot a la permission "Manage Events"
-
-## Support
-
-Pour toute aide, contactez @Patrakolos sur Discord.
+- `/session create|edit|list|info|status|cancel` — gestion des sessions (MJ pour create/edit/status/cancel)
+- `/register join|leave|my-sessions` — inscriptions joueurs
+- `/mj promote|kick|remind` — outils MJ
