@@ -29,3 +29,9 @@
 - 2026-09-08 [USER] User merged agent/netlify-supabase into main and pushed; Netlify git deploy attempted.
 - 2026-09-08 [TOOL] Netlify secrets-scan failed, flagging only TIMEZONE: scanner matches configured env var VALUES against deploy files; "Europe/Paris" (default in src/config.js) collides. Real secrets appear in no repo file (verified origin/main: 0 matches) → false positive. Fix: remove TIMEZONE from Netlify UI env vars (code defaults to Europe/Paris) or set SECRETS_SCAN_OMIT_KEYS=TIMEZONE.
 - 2026-09-08 [USER] DISCORD_TOKEN and Client Secret pasted in chat → burned; must be reset in portal. Local .env created (gitignored, verified) with non-secret values; token + real DB password left blank for user. DATABASE_URL should use pooler port 6543 (user's paste had 5432 direct).
+
+## [DISCOVERIES] — deploy round 2
+- 2026-09-08 [TOOL] Second secrets-scan failure at d9eedc5 flagged DISCORD_PUBLIC_KEY, APPLICATION_ID, GUILD_ID, CHANNEL_ID, DATABASE_URL — all traced to one file: `session-ses_f7ed.md` (session export committed in d9eedc5, contains pasted credentials incl. old token ×6 and bracketed placeholder DB password; 0 real DB creds). TIMEZONE absent from list → user removed it from Netlify UI as instructed.
+- 2026-09-08 [CODE] Fix commit ded9839: `git rm --cached session-ses_f7ed.md`, `session-*.md` added to .gitignore, ff-merged to main, pushed. Verified 0 flagged-value matches in HEAD. NOTE: local session file no longer on disk (regenerable via `opencode export`).
+- 2026-09-08 [USER] .env now fully filled (token + DB password non-empty) → user completed token reset + DB password steps.
+- 2026-09-08 [ASSUMPTION] Git history still contains the old token/Client Secret (dead after reset) and session file in d9eedc5 — harmless; history purge optional.
