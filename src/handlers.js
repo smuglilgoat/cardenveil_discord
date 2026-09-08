@@ -66,6 +66,7 @@ export async function handleInteraction(interaction) {
       case 'session': return handleSessionCommand(interaction);
       case 'register': return handleRegisterCommand(interaction);
       case 'mj': return handleMjCommand(interaction);
+      case 'ping': return text('🏓 Pong ! Le bot est en ligne.');
     }
   }
 

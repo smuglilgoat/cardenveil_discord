@@ -105,4 +105,8 @@ export const commands = [
       },
     ],
   },
+  {
+    name: 'ping',
+    description: 'Vérifier que le bot est en ligne',
+  },
 ];
