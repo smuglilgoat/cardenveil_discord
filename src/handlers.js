@@ -342,7 +342,7 @@ async function handleSetupDetailsButton(interaction, sessionId) {
         row(textInput('duration', t('field_duration'), { required: false, value: session.duration || '', placeholder: '4h / 2 sessions / 2x 3h30' })),
         row(textInput('platform', t('field_platform'), { required: false, value: session.platform || '', placeholder: 'Owlbear / Overlay Cardenveil' })),
         row(textInput('warnings', t('field_warnings'), { required: false, value: session.warnings || '', placeholder: 'Violence, Psychologique, Torture' })),
-        row(textInput('tags', t('field_tags'), { required: false, value: session.tags || '', placeholder: '#Stratégique #Goofy #Epreuves' })),
+        row(textInput('tags', t('field_tags'), { required: false, value: session.tags || '', placeholder: 'Séparés par des espaces — #Stratégique #Goofy #Epreuves' })),
         row(textInput('comments', t('field_comments'), { style: 2, required: false, value: session.comments || '' })),
       ],
     },
@@ -725,7 +725,8 @@ function textInput(customId, label, { style = 1, placeholder, required = true, v
   return {
     type: 4, // TEXT_INPUT (1 = short, 2 = paragraph)
     custom_id: customId,
-    label,
+    // Discord rejects modals whose labels exceed 45 chars (50035)
+    label: label.slice(0, 45),
     style,
     required,
     ...(placeholder && { placeholder }),
