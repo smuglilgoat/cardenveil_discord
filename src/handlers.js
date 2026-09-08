@@ -4,6 +4,7 @@ import {
   getGuildRoles,
   postMessage,
   editMessage,
+  editOriginal,
   sendDm,
   createScheduledEvent,
   deleteScheduledEvent,
@@ -27,9 +28,8 @@ const BUTTON = 3;
 const MODAL_SUBMIT = 5;
 
 // Response types
-const MESSAGE = 4;
-const MODAL = 9;
-const UPDATE_MESSAGE = 7; // in-place edit of the message a component sits on
+const MESSAGE = 4;   // immediate reply
+const MODAL = 9;     // open a form
 
 const ephemeral = (data) => ({ type: MESSAGE, data: { flags: 64, ...data } });
 const text = (content) => ephemeral({ content });
@@ -46,6 +46,26 @@ async function isMj(interaction) {
   return !!mj && interaction.member.roles.includes(mj.id);
 }
 
+/**
+ * Deferred response pattern: ACK instantly (Discord's 3s limit only applies
+ * to the initial response), run the work via context.waitUntil, then PATCH
+ * the "thinking" message into the final result via the webhook endpoint.
+ * workFn returns a message payload { content?, embeds?, components? }.
+ */
+function deferred(context, interaction, workFn, { ephemeralAck = true } = {}) {
+  const token = interaction.token;
+  context.waitUntil((async () => {
+    try {
+      const payload = await workFn();
+      await editOriginal(token, payload);
+    } catch (err) {
+      console.error('[Interaction] background work failed:', err);
+      try { await editOriginal(token, { content: t('error_generic') }); } catch { /* token expired */ }
+    }
+  })());
+  return ephemeralAck ? { type: 5, data: { flags: 64 } } : { type: 5 };
+}
+
 async function refreshAnnouncement(session) {
   if (!session.announcement_message_id || !session.announcement_channel_id) return;
   try {
@@ -60,14 +80,15 @@ async function refreshAnnouncement(session) {
 
 // ─── Router ────────────────────────────────────────────────────────
 
-export async function handleInteraction(interaction) {
+export async function handleInteraction(interaction, context) {
   if (!interaction.guild_id) return text(t('guild_only'));
+  context = context ?? { waitUntil: () => {} };
 
   if (interaction.type === COMMAND) {
     switch (interaction.data.name) {
-      case 'session': return handleSessionCommand(interaction);
-      case 'register': return handleRegisterCommand(interaction);
-      case 'mj': return handleMjCommand(interaction);
+      case 'session': return handleSessionCommand(interaction, context);
+      case 'register': return handleRegisterCommand(interaction, context);
+      case 'mj': return handleMjCommand(interaction, context);
       case 'ping': return text('🏓 Pong ! Le bot est en ligne.');
     }
   }
@@ -75,23 +96,35 @@ export async function handleInteraction(interaction) {
   if (interaction.type === BUTTON) {
     const [action, sessionId] = interaction.data.custom_id.split(':');
     switch (action) {
-      case 'register': return handleRegisterButton(interaction, Number(sessionId));
-      case 'unregister': return handleUnregisterButton(interaction, Number(sessionId));
-      // Setup panel: dropdowns setformat/settype/setlevel + details/finish buttons
+      case 'register': return deferred(context, interaction, () => doRegister(interaction, Number(sessionId)));
+      case 'unregister': return deferred(context, interaction, () => doUnregister(interaction, Number(sessionId)));
+      // Setup panel: dropdowns setformat/settype/setlevel + buttons
       case 'setformat':
       case 'settype':
       case 'setlevel':
-        return handleSetupSelect(interaction, Number(sessionId), action.slice(3), interaction.data.values?.[0]);
-      case 'details': return handleSetupDetails(interaction, Number(sessionId));
-      case 'publish': return handleSetupPublish(interaction, Number(sessionId));
-      case 'finish': return handleSetupFinish();
+        return deferred(context, interaction, () =>
+          doSetupSelect(interaction, Number(sessionId), action.slice(3), interaction.data.values?.[0]));
+      case 'edit': return handleSetupEditButton(interaction, Number(sessionId));
+      case 'details': return handleSetupDetailsButton(interaction, Number(sessionId));
+      case 'publish': return deferred(context, interaction, () => doSetupPublish(interaction, Number(sessionId)));
+      case 'finish': return deferred(context, interaction, () => ({
+        content: t('setup_done'),
+        embeds: [],
+        components: [],
+      }));
     }
   }
 
   if (interaction.type === MODAL_SUBMIT) {
-    if (interaction.data.custom_id === 'session_create_modal') return handleSessionCreateModal(interaction);
-    if (interaction.data.custom_id.startsWith('session_edit_modal:')) return handleSessionEditModal(interaction);
-    if (interaction.data.custom_id.startsWith('session_details_modal:')) return handleSessionDetailsModal(interaction);
+    if (interaction.data.custom_id === 'session_create_modal') {
+      return deferred(context, interaction, () => doSessionCreateModal(interaction));
+    }
+    if (interaction.data.custom_id.startsWith('session_edit_modal:')) {
+      return deferred(context, interaction, () => doSessionEditModal(interaction));
+    }
+    if (interaction.data.custom_id.startsWith('session_details_modal:')) {
+      return deferred(context, interaction, () => doSessionDetailsModal(interaction));
+    }
   }
 
   return text(t('error_generic'));
@@ -99,14 +132,20 @@ export async function handleInteraction(interaction) {
 
 // ─── /session ──────────────────────────────────────────────────────
 
-async function handleSessionCommand(interaction) {
+function handleSessionCommand(interaction, context) {
   switch (subcommand(interaction)) {
     case 'create': return handleSessionCreate(interaction);
     case 'edit': return handleSessionEdit(interaction);
-    case 'list': return handleSessionList(interaction);
-    case 'info': return handleSessionInfo(interaction);
-    case 'status': return handleSessionStatus(interaction);
-    case 'cancel': return handleSessionCancel(interaction);
+    case 'list': return deferred(context, interaction, async () => ({
+      embeds: [await buildCalendarEmbed(await db.getUpcomingSessions())],
+    }), { ephemeralAck: false });
+    case 'info': return deferred(context, interaction, async () => {
+      const session = await db.getSessionById(option(interaction, 'id'));
+      if (!session) return { content: t('session_not_found') };
+      return { embeds: [await buildSessionEmbed(session)] };
+    }, { ephemeralAck: false });
+    case 'status': return deferred(context, interaction, () => doSessionStatus(interaction));
+    case 'cancel': return deferred(context, interaction, () => doSessionCancel(interaction));
     default: return text(t('error_generic'));
   }
 }
@@ -119,7 +158,7 @@ async function handleSessionCreate(interaction) {
       custom_id: 'session_create_modal',
       title: t('session_create_title'),
       // Discord modals are capped at 5 inputs — essentials only.
-      // MJ is the invoker; description/comments etc. via /session edit.
+      // Remaining fields come from the setup panel (dropdowns + details modal).
       components: [
         row(textInput('system', t('field_system'), { placeholder: 'Cardenveil Layer 1' })),
         row(textInput('date', t('field_date'), { placeholder: '2026-06-13 14:00 ou Samedi 13 Juin 2026 14:00' })),
@@ -131,85 +170,29 @@ async function handleSessionCreate(interaction) {
   };
 }
 
+// /session edit opens the same interactive panel as create (dropdowns +
+// buttons); the 5-field modal stays reachable via the ⚙️ Modifier button.
 async function handleSessionEdit(interaction) {
   if (!(await isMj(interaction))) return text(t('mj_only'));
   const session = await db.getSessionById(option(interaction, 'id'));
   if (!session) return text(t('session_not_found'));
 
   return {
-    type: MODAL,
+    type: MESSAGE,
     data: {
-      custom_id: `session_edit_modal:${session.id}`,
-      title: `${t('session_edit_title')} #${session.id}`.slice(0, 45),
-      components: [
-        row(textInput('date', t('field_date'), { required: false, value: session.date_text || '', placeholder: 'Vide = à définir' })),
-        row(textInput('max_players', t('field_max_players'), { value: String(session.max_players || ''), placeholder: '3' })),
-        row(textInput('status', t('field_status'), { value: session.status || 'recrutement', placeholder: 'recrutement / en_preparation / pret / fini / cancelled' })),
-        row(textInput('description', t('field_description'), { style: 2, required: false, value: session.description || '' })),
-        row(textInput('comments', t('field_comments'), { style: 2, required: false, value: session.comments || '' })),
-      ],
+      flags: 64,
+      content: t('session_setup'),
+      embeds: [await buildSessionEmbed(session)],
+      components: buildSetupComponents(session, { withEditButton: true }),
     },
   };
 }
 
-async function handleSessionList(interaction) {
-  const sessions = await db.getUpcomingSessions();
-  return { type: MESSAGE, data: { embeds: [await buildCalendarEmbed(sessions)] } };
-}
+// ─── Session modals (background work) ──────────────────────────────
 
-async function handleSessionInfo(interaction) {
-  const session = await db.getSessionById(option(interaction, 'id'));
-  if (!session) return text(t('session_not_found'));
-  return { type: MESSAGE, data: { embeds: [await buildSessionEmbed(session)] } };
-}
-
-async function handleSessionStatus(interaction) {
-  if (!(await isMj(interaction))) return text(t('mj_only'));
-  const session = await db.getSessionById(option(interaction, 'id'));
-  if (!session) return text(t('session_not_found'));
-
-  const newStatus = option(interaction, 'status');
-  await db.updateSession(session.id, { status: newStatus });
-  const updated = await db.getSessionById(session.id);
-
-  if (newStatus === 'cancelled' || newStatus === 'fini') {
-    await closeSessionSideEffects(interaction, updated);
-  }
-
-  await refreshAnnouncement(updated);
-  return text(t('session_status_updated'));
-}
-
-async function handleSessionCancel(interaction) {
-  if (!(await isMj(interaction))) return text(t('mj_only'));
-  const session = await db.getSessionById(option(interaction, 'id'));
-  if (!session) return text(t('session_not_found'));
-
-  await db.updateSession(session.id, { status: 'cancelled' });
-  const updated = await db.getSessionById(session.id);
-
-  await closeSessionSideEffects(interaction, updated);
-  await refreshAnnouncement(updated);
-  return text(t('session_cancelled'));
-}
-
-// Delete Discord event + reminders when a session closes.
-async function closeSessionSideEffects(interaction, session) {
-  if (session.discord_event_id) {
-    try {
-      await deleteScheduledEvent(interaction.guild_id, session.discord_event_id);
-    } catch (err) {
-      console.error('Failed to delete Discord event:', err);
-    }
-  }
-  await db.deleteRemindersForSession(session.id);
-}
-
-// ─── Session create modal ──────────────────────────────────────────
-
-async function handleSessionCreateModal(interaction) {
+async function doSessionCreateModal(interaction) {
   const maxPlayers = parseMaxPlayers(modalValue(interaction, 'max_players'));
-  if (!maxPlayers) return text(t('error_invalid_players'));
+  if (!maxPlayers) return { content: t('error_invalid_players') };
 
   const dateInput = modalValue(interaction, 'date');
   const dateTimestamp = parseDateToTimestamp(dateInput);
@@ -254,17 +237,10 @@ async function handleSessionCreateModal(interaction) {
   await scheduleReminders(session.id, dateTimestamp);
 
   const updated = await db.getSessionById(session.id);
-
-  // Respond with the interactive setup panel: dropdowns (format/type/level)
-  // + details modal button. The session row in the DB is the wizard state.
   return {
-    type: MESSAGE,
-    data: {
-      content: t('session_created'),
-      embeds: [await buildSessionEmbed(updated)],
-      components: buildSetupComponents(updated),
-      flags: 64,
-    },
+    content: `${t('session_created')} ${t('session_setup')}`,
+    embeds: [await buildSessionEmbed(updated)],
+    components: buildSetupComponents(updated),
   };
 }
 
@@ -294,8 +270,8 @@ function buildEventDescription(session) {
 
 // ─── Setup panel (post-creation wizard) ────────────────────────────
 // Modals are capped at 5 inputs, so remaining fields are collected via
-// dropdowns on the ephemeral confirmation + a second "details" modal.
-// The session row in the DB is the wizard state — no draft storage needed.
+// dropdowns on the panel + a second "details" modal. The session row in
+// the DB is the wizard state — no draft storage needed.
 
 function selectMenu(customId, placeholder, options) {
   return {
@@ -312,64 +288,28 @@ function button(customId, label, style, disabled = false) {
   return { type: 2, custom_id: customId, label, style, disabled };
 }
 
-function buildSetupComponents(session) {
+function buildSetupComponents(session, { withEditButton = false } = {}) {
   const published = !!session.announcement_message_id;
+  const buttons = [];
+  if (withEditButton) {
+    buttons.push(button(`edit:${session.id}`, t('setup_edit_btn'), 2)); // Primary
+  }
+  buttons.push(
+    button(`publish:${session.id}`, t('setup_publish_btn'), 3, published), // Success, disabled once published
+    button(`details:${session.id}`, t('setup_details_btn'), 2),            // Primary
+    button(`finish:${session.id}`, t('setup_finish_btn'), 4),              // Neutral
+  );
   return [
     row(selectMenu(`setformat:${session.id}`, t('select_format'), ['One shot', 'Two shot', 'Mini shot'])),
     row(selectMenu(`settype:${session.id}`, t('select_type'), ['En ligne', 'IRL', 'Mixte'])),
     row(selectMenu(`setlevel:${session.id}`, t('select_level'), ['Débutant', 'Intermédiaire', 'Avancé'])),
-    {
-      type: 1,
-      components: [
-        button(`publish:${session.id}`, t('setup_publish_btn'), 3, published),  // Success, disabled once published
-        button(`details:${session.id}`, t('setup_details_btn'), 2),             // Primary
-        button(`finish:${session.id}`, t('setup_finish_btn'), 4),               // Neutral
-      ],
-    },
+    { type: 1, components: buttons },
   ];
 }
 
-async function handleSetupPublish(interaction, sessionId) {
+async function doSetupSelect(interaction, sessionId, field, value) {
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
-
-  if (!session.announcement_message_id) {
-    if (!config.announcementChannelId) return text(t('error_generic'));
-    try {
-      const threadLink = session.forum_thread_id
-        ? `https://discord.com/channels/${interaction.guild_id}/${session.forum_thread_id}`
-        : null;
-      const message = await postMessage(config.announcementChannelId, {
-        ...(threadLink && { content: `🧵 Discussion d'organisation : ${threadLink}` }),
-        embeds: [await buildSessionEmbed(session)],
-        components: buildRegistrationButtons(session),
-      });
-      await db.updateSession(session.id, {
-        announcement_message_id: message.id,
-        announcement_channel_id: message.channel_id,
-      });
-    } catch (err) {
-      console.error('Failed to publish announcement:', err);
-      return text(t('error_generic'));
-    }
-  }
-
-  const updated = await db.getSessionById(sessionId);
-  await refreshAnnouncement(updated);
-
-  return {
-    type: UPDATE_MESSAGE,
-    data: {
-      content: `${t('session_created')} ${t('setup_published')}`,
-      embeds: [await buildSessionEmbed(updated)],
-      components: buildSetupComponents(updated),
-    },
-  };
-}
-
-async function handleSetupSelect(interaction, sessionId, field, value) {
-  const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
+  if (!session) return { content: t('session_not_found') };
 
   await db.updateSession(sessionId, { [field]: value || null });
   const updated = await db.getSessionById(sessionId);
@@ -377,16 +317,19 @@ async function handleSetupSelect(interaction, sessionId, field, value) {
 
   // Re-render the panel in place so the embed reflects the new value.
   return {
-    type: UPDATE_MESSAGE,
-    data: {
-      content: t('session_created'),
-      embeds: [await buildSessionEmbed(updated)],
-      components: buildSetupComponents(updated),
-    },
+    content: t('session_setup'),
+    embeds: [await buildSessionEmbed(updated)],
+    components: buildSetupComponents(updated),
   };
 }
 
-async function handleSetupDetails(interaction, sessionId) {
+async function handleSetupEditButton(interaction, sessionId) {
+  const session = await db.getSessionById(sessionId);
+  if (!session) return text(t('session_not_found'));
+  return { type: MODAL, data: sessionEditModalData(session) };
+}
+
+async function handleSetupDetailsButton(interaction, sessionId) {
   const session = await db.getSessionById(sessionId);
   if (!session) return text(t('session_not_found'));
 
@@ -406,10 +349,45 @@ async function handleSetupDetails(interaction, sessionId) {
   };
 }
 
-async function handleSessionDetailsModal(interaction) {
+async function doSetupPublish(interaction, sessionId) {
+  const session = await db.getSessionById(sessionId);
+  if (!session) return { content: t('session_not_found') };
+
+  if (!session.announcement_message_id) {
+    if (!config.announcementChannelId) return { content: t('error_generic') };
+    try {
+      const threadLink = session.forum_thread_id
+        ? `https://discord.com/channels/${interaction.guild_id}/${session.forum_thread_id}`
+        : null;
+      const message = await postMessage(config.announcementChannelId, {
+        ...(threadLink && { content: `🧵 Discussion d'organisation : ${threadLink}` }),
+        embeds: [await buildSessionEmbed(session)],
+        components: buildRegistrationButtons(session),
+      });
+      await db.updateSession(session.id, {
+        announcement_message_id: message.id,
+        announcement_channel_id: message.channel_id,
+      });
+    } catch (err) {
+      console.error('Failed to publish announcement:', err);
+      return { content: t('error_generic') };
+    }
+  }
+
+  const updated = await db.getSessionById(sessionId);
+  await refreshAnnouncement(updated);
+
+  return {
+    content: `${t('session_setup')} ${t('setup_published')}`,
+    embeds: [await buildSessionEmbed(updated)],
+    components: buildSetupComponents(updated),
+  };
+}
+
+async function doSessionDetailsModal(interaction) {
   const sessionId = Number(interaction.data.custom_id.split(':')[1]);
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
+  if (!session) return { content: t('session_not_found') };
 
   await db.updateSession(sessionId, {
     duration: modalValue(interaction, 'duration'),
@@ -422,25 +400,35 @@ async function handleSessionDetailsModal(interaction) {
   const updated = await db.getSessionById(sessionId);
   await refreshAnnouncement(updated);
 
-  return ephemeral({
+  return {
     content: t('setup_updated'),
     embeds: [await buildSessionEmbed(updated)],
-  });
+  };
 }
 
-async function handleSetupFinish() {
-  return { type: UPDATE_MESSAGE, data: { content: t('setup_done'), embeds: [], components: [] } };
+// ─── Session edit modal (date/max/status/description/comments) ─────
+
+function sessionEditModalData(session) {
+  return {
+    custom_id: `session_edit_modal:${session.id}`,
+    title: `${t('session_edit_title')} #${session.id}`.slice(0, 45),
+    components: [
+      row(textInput('date', t('field_date'), { required: false, value: session.date_text || '', placeholder: 'Vide = à définir' })),
+      row(textInput('max_players', t('field_max_players'), { value: String(session.max_players || ''), placeholder: '3' })),
+      row(textInput('status', t('field_status'), { value: session.status || 'recrutement', placeholder: 'recrutement / en_preparation / pret / fini / cancelled' })),
+      row(textInput('description', t('field_description'), { style: 2, required: false, value: session.description || '' })),
+      row(textInput('comments', t('field_comments'), { style: 2, required: false, value: session.comments || '' })),
+    ],
+  };
 }
 
-// ─── Session edit modal ────────────────────────────────────────────
-
-async function handleSessionEditModal(interaction) {
+async function doSessionEditModal(interaction) {
   const sessionId = Number(interaction.data.custom_id.split(':')[1]);
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
+  if (!session) return { content: t('session_not_found') };
 
   const maxPlayers = parseMaxPlayers(modalValue(interaction, 'max_players'));
-  if (!maxPlayers) return text(t('error_invalid_players'));
+  if (!maxPlayers) return { content: t('error_invalid_players') };
 
   const dateInput = modalValue(interaction, 'date');
   const newDateTimestamp = parseDateToTimestamp(dateInput);
@@ -485,49 +473,91 @@ async function handleSessionEditModal(interaction) {
   const finalSession = await db.getSessionById(sessionId);
   await refreshAnnouncement(finalSession);
 
-  return ephemeral({
+  return {
     content: t('session_edited', { id: sessionId }),
     embeds: [await buildSessionEmbed(finalSession)],
-  });
+  };
+}
+
+async function doSessionStatus(interaction) {
+  if (!(await isMj(interaction))) return { content: t('mj_only') };
+  const session = await db.getSessionById(option(interaction, 'id'));
+  if (!session) return { content: t('session_not_found') };
+
+  const newStatus = option(interaction, 'status');
+  await db.updateSession(session.id, { status: newStatus });
+  const updated = await db.getSessionById(session.id);
+
+  if (newStatus === 'cancelled' || newStatus === 'fini') {
+    await closeSessionSideEffects(interaction, updated);
+  }
+
+  await refreshAnnouncement(updated);
+  return { content: t('session_status_updated') };
+}
+
+async function doSessionCancel(interaction) {
+  if (!(await isMj(interaction))) return { content: t('mj_only') };
+  const session = await db.getSessionById(option(interaction, 'id'));
+  if (!session) return { content: t('session_not_found') };
+
+  await db.updateSession(session.id, { status: 'cancelled' });
+  const updated = await db.getSessionById(session.id);
+
+  await closeSessionSideEffects(interaction, updated);
+  await refreshAnnouncement(updated);
+  return { content: t('session_cancelled') };
+}
+
+// Delete Discord event + reminders when a session closes.
+async function closeSessionSideEffects(interaction, session) {
+  if (session.discord_event_id) {
+    try {
+      await deleteScheduledEvent(interaction.guild_id, session.discord_event_id);
+    } catch (err) {
+      console.error('Failed to delete Discord event:', err);
+    }
+  }
+  await db.deleteRemindersForSession(session.id);
 }
 
 // ─── /register ─────────────────────────────────────────────────────
 
-async function handleRegisterCommand(interaction) {
+function handleRegisterCommand(interaction, context) {
   switch (subcommand(interaction)) {
-    case 'join': return handleJoin(interaction);
-    case 'leave': return handleLeave(interaction);
-    case 'my-sessions': return handleMySessions(interaction);
+    case 'join': return deferred(context, interaction, () => doJoin(interaction));
+    case 'leave': return deferred(context, interaction, () => doLeave(interaction));
+    case 'my-sessions': return deferred(context, interaction, () => doMySessions(interaction));
     default: return text(t('error_generic'));
   }
 }
 
-async function handleJoin(interaction) {
+async function doJoin(interaction) {
   const sessionId = option(interaction, 'id');
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
-  if (session.status === 'fini' || session.status === 'cancelled') return text(t('session_already_full'));
+  if (!session) return { content: t('session_not_found') };
+  if (session.status === 'fini' || session.status === 'cancelled') return { content: t('session_already_full') };
 
   const userId = interaction.member.user.id;
-  if (await db.getRegistration(sessionId, userId)) return text(t('already_registered'));
+  if (await db.getRegistration(sessionId, userId)) return { content: t('already_registered') };
 
   const confirmedCount = await db.getConfirmedCount(sessionId);
   if (session.max_players && confirmedCount >= session.max_players) {
     const waitlistCount = await db.getWaitlistCount(sessionId);
     await db.registerPlayer(sessionId, userId, 'waitlist');
-    return text(t('waitlisted', { position: waitlistCount + 1 }));
+    return { content: t('waitlisted', { position: waitlistCount + 1 }) };
   }
 
   await db.registerPlayer(sessionId, userId, 'confirmed');
   await refreshAnnouncement(await db.getSessionById(sessionId));
-  return text(t('registered'));
+  return { content: t('registered') };
 }
 
-async function handleLeave(interaction) {
+async function doLeave(interaction) {
   const sessionId = option(interaction, 'id');
   const userId = interaction.member.user.id;
   const existing = await db.getRegistration(sessionId, userId);
-  if (!existing) return text(t('not_registered'));
+  if (!existing) return { content: t('not_registered') };
 
   await db.unregisterPlayer(sessionId, userId);
 
@@ -535,15 +565,15 @@ async function handleLeave(interaction) {
     await promoteNextFromWaitlist(sessionId);
     await refreshAnnouncement(await db.getSessionById(sessionId));
   }
-  return text(t('unregistered'));
+  return { content: t('unregistered') };
 }
 
-async function handleMySessions(interaction) {
+async function doMySessions(interaction) {
   const userId = interaction.member.user.id;
   const registrations = await db.getRegistrationsForUser(userId);
 
   if (registrations.length === 0) {
-    return text("Vous n'êtes inscrit à aucune session.");
+    return { content: "Vous n'êtes inscrit à aucune session." };
   }
 
   const lines = registrations.map(reg => {
@@ -555,49 +585,49 @@ async function handleMySessions(interaction) {
     return `${icon} **#${reg.session_id}** — ${reg.system || 'Cardenveil'} — ${date} (${status})`;
   });
 
-  return ephemeral({
-    embeds: [{ color: 0x5865f2, title: '📋 Vos inscriptions', description: lines.join('\n') }],
-  });
+  return { embeds: [{ color: 0x5865f2, title: '📋 Vos inscriptions', description: lines.join('\n') }] };
 }
 
 // ─── /mj ───────────────────────────────────────────────────────────
 
-async function handleMjCommand(interaction) {
-  if (!(await isMj(interaction))) return text(t('mj_only'));
+function handleMjCommand(interaction, context) {
+  return deferred(context, interaction, async () => {
+    if (!(await isMj(interaction))) return { content: t('mj_only') };
 
-  switch (subcommand(interaction)) {
-    case 'promote': return handlePromote(interaction);
-    case 'kick': return handleKick(interaction);
-    case 'remind': return handleMjRemind(interaction);
-    default: return text(t('error_generic'));
-  }
+    switch (subcommand(interaction)) {
+      case 'promote': return doPromote(interaction);
+      case 'kick': return doKick(interaction);
+      case 'remind': return doMjRemind(interaction);
+      default: return { content: t('error_generic') };
+    }
+  });
 }
 
-async function handlePromote(interaction) {
+async function doPromote(interaction) {
   const sessionId = option(interaction, 'session');
   const targetId = option(interaction, 'joueur');
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
+  if (!session) return { content: t('session_not_found') };
 
   const registration = await db.getRegistration(sessionId, targetId);
-  if (!registration) return text(t('not_registered'));
-  if (registration.status === 'confirmed') return text(t('player_already_confirmed'));
+  if (!registration) return { content: t('not_registered') };
+  if (registration.status === 'confirmed') return { content: t('player_already_confirmed') };
 
   await db.updateRegistrationStatus(sessionId, targetId, 'confirmed');
   await notifyPromoted(targetId);
   await refreshAnnouncement(await db.getSessionById(sessionId));
 
-  return text(t('mj_promoted', { user: `<@${targetId}>` }));
+  return { content: t('mj_promoted', { user: `<@${targetId}>` }) };
 }
 
-async function handleKick(interaction) {
+async function doKick(interaction) {
   const sessionId = option(interaction, 'session');
   const targetId = option(interaction, 'joueur');
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
+  if (!session) return { content: t('session_not_found') };
 
   const registration = await db.getRegistration(sessionId, targetId);
-  if (!registration) return text(t('not_registered'));
+  if (!registration) return { content: t('not_registered') };
 
   const wasConfirmed = registration.status === 'confirmed';
   await db.unregisterPlayer(sessionId, targetId);
@@ -607,34 +637,34 @@ async function handleKick(interaction) {
     await refreshAnnouncement(await db.getSessionById(sessionId));
   }
 
-  return text(t('mj_kicked', { user: `<@${targetId}>` }));
+  return { content: t('mj_kicked', { user: `<@${targetId}>` }) };
 }
 
-// Fixed: used to read session.date (nonexistent column); now uses date_timestamp
-// and stores a real unix-seconds scheduled_at so the reminder actually fires.
-async function handleMjRemind(interaction) {
+// Uses date_timestamp (the old session.date column never existed) and stores
+// a real unix-seconds scheduled_at so the reminder actually fires.
+async function doMjRemind(interaction) {
   const sessionId = option(interaction, 'session');
   const hours = option(interaction, 'hours');
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
-  if (!session.date_timestamp) return text(t('no_date'));
+  if (!session) return { content: t('session_not_found') };
+  if (!session.date_timestamp) return { content: t('no_date') };
 
   const at = session.date_timestamp - hours * 3600;
-  if (at <= Math.floor(Date.now() / 1000)) return text(t('reminder_past'));
+  if (at <= Math.floor(Date.now() / 1000)) return { content: t('reminder_past') };
 
-  await db.createReminder(sessionId, `custom_${hours}h`, at);
-  return text(t('mj_reminder_set', { hours }));
+  await db.createReminder(session.id, `custom_${hours}h`, at);
+  return { content: t('mj_reminder_set', { hours }) };
 }
 
 // ─── Registration buttons ──────────────────────────────────────────
 
-async function handleRegisterButton(interaction, sessionId) {
+async function doRegister(interaction, sessionId) {
   const session = await db.getSessionById(sessionId);
-  if (!session) return text(t('session_not_found'));
-  if (session.status === 'fini' || session.status === 'cancelled') return text(t('session_already_full'));
+  if (!session) return { content: t('session_not_found') };
+  if (session.status === 'fini' || session.status === 'cancelled') return { content: t('session_already_full') };
 
   const userId = interaction.member.user.id;
-  if (await db.getRegistration(sessionId, userId)) return text(t('already_registered'));
+  if (await db.getRegistration(sessionId, userId)) return { content: t('already_registered') };
 
   const confirmedCount = await db.getConfirmedCount(sessionId);
   let reply;
@@ -648,13 +678,13 @@ async function handleRegisterButton(interaction, sessionId) {
   }
 
   await refreshAnnouncement(await db.getSessionById(sessionId));
-  return text(reply);
+  return { content: reply };
 }
 
-async function handleUnregisterButton(interaction, sessionId) {
+async function doUnregister(interaction, sessionId) {
   const userId = interaction.member.user.id;
   const existing = await db.getRegistration(sessionId, userId);
-  if (!existing) return text(t('not_registered'));
+  if (!existing) return { content: t('not_registered') };
 
   await db.unregisterPlayer(sessionId, userId);
 
@@ -662,7 +692,7 @@ async function handleUnregisterButton(interaction, sessionId) {
     await promoteNextFromWaitlist(sessionId);
     await refreshAnnouncement(await db.getSessionById(sessionId));
   }
-  return text(t('unregistered'));
+  return { content: t('unregistered') };
 }
 
 // ─── Shared helpers ────────────────────────────────────────────────
@@ -674,6 +704,14 @@ async function promoteNextFromWaitlist(sessionId) {
     await sendDm(next.user_id, { content: t('promoted') });
   } catch {
     console.warn(`Could not notify promoted user ${next.user_id}`);
+  }
+}
+
+async function notifyPromoted(userId) {
+  try {
+    await sendDm(userId, { content: t('promoted') });
+  } catch {
+    console.warn(`Could not notify promoted user ${userId}`);
   }
 }
 

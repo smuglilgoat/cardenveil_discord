@@ -44,3 +44,11 @@ export const deleteScheduledEvent = (guildId, eventId) =>
 // Create a thread (post) in a forum channel. Returns the thread channel.
 export const createForumThread = (forumChannelId, body) =>
   discordFetch(`/channels/${forumChannelId}/threads`, { method: 'POST', body });
+
+// Update the original response of a deferred interaction ("thinking" → final
+// message). Interaction tokens stay valid for 15 minutes.
+export const editOriginal = (interactionToken, payload) =>
+  discordFetch(`/webhooks/${config.applicationId}/${interactionToken}/messages/@original`, {
+    method: 'PATCH',
+    body: payload,
+  });

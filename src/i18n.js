@@ -1,6 +1,6 @@
 import config from './config.js';
 
-const translations = {
+export const translations = {
   fr: {
     // Session creation
     session_create_title: '🎲 Créer une Session Cardenveil',
@@ -15,8 +15,13 @@ const translations = {
     session_edited: '✅ Session #{id} modifiée avec succès !',
 
     // Setup panel (post-creation wizard)
+    session_setup: '🛠 Configurez la session — chaque changement se répercute en direct.',
     session_details_title: 'Détails de la Session',
     setup_details_btn: '✏️ Détails supplémentaires',
+    setup_finish_btn: '✅ Terminer',
+    setup_publish_btn: "📢 Publier l'annonce",
+    setup_published: "📢 Annonce publiée !",
+    setup_edit_btn: '⚙️ Modifier (date/joueurs/statut)',
     setup_finish_btn: '✅ Terminer',
     setup_publish_btn: "📢 Publier l'annonce",
     setup_published: "📢 Annonce publiée !",
@@ -116,11 +121,13 @@ const translations = {
     session_edited: '✅ Session #{id} edited successfully!',
 
     // Setup panel (post-creation wizard)
+    session_setup: '🛠 Configure the session — every change goes live instantly.',
     session_details_title: 'Session Details',
     setup_details_btn: '✏️ More details',
     setup_finish_btn: '✅ Finish',
     setup_publish_btn: '📢 Publish announcement',
     setup_published: '📢 Announcement published!',
+    setup_edit_btn: '⚙️ Edit (date/players/status)',
     setup_done: '✅ Session configured!',
     setup_updated: '✅ Details saved.',
     select_format: 'Format (One shot / Two shot / Mini shot)',

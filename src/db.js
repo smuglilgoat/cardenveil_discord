@@ -8,8 +8,16 @@ function getSql() {
     if (!config.databaseUrl) {
       throw new Error('DATABASE_URL is missing in environment');
     }
-    // ponytail: max:1 + prepare:false — safe against Supabase transaction pooler (pgbouncer)
-    sql = postgres(config.databaseUrl, { prepare: false, max: 1 });
+    // ponytail: max:1 + prepare:false — safe against Supabase transaction pooler (pgbouncer).
+    // Timeouts bound transient pooler stalls: serverless must never hang a user
+    // on a dead TCP connection.
+    sql = postgres(config.databaseUrl, {
+      prepare: false,
+      max: 1,
+      connect_timeout: 10,
+      idle_timeout: 20,
+      max_lifetime: 300,
+    });
   }
   return sql;
 }
