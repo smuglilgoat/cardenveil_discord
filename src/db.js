@@ -70,15 +70,12 @@ export async function getUpcomingSessions() {
 }
 
 export async function updateSession(id, data) {
-  const entries = Object.entries(nullify(data));
-  if (entries.length === 0) return getSessionById(id);
-  const client = getSql();
-  const set = client.join(
-    entries.map(([k, v]) => client`${client(k)} = ${v}`),
-    client`, `,
-  );
-  const rows = await client`
-    update sessions set ${set}, updated_at = now()
+  const updates = nullify(data);
+  if (Object.keys(updates).length === 0) return getSessionById(id);
+  updates.updated_at = new Date();
+  // postgres.js object builder after 'set' → safe `col = $n` assignments
+  const rows = await getSql()`
+    update sessions set ${getSql()(updates)}
     where id = ${id}
     returning *
   `;

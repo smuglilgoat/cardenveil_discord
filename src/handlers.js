@@ -28,6 +28,7 @@ const MODAL_SUBMIT = 5;
 // Response types
 const MESSAGE = 4;
 const MODAL = 9;
+const UPDATE_MESSAGE = 7; // in-place edit of the message a component sits on
 
 const ephemeral = (data) => ({ type: MESSAGE, data: { flags: 64, ...data } });
 const text = (content) => ephemeral({ content });
@@ -72,13 +73,23 @@ export async function handleInteraction(interaction) {
 
   if (interaction.type === BUTTON) {
     const [action, sessionId] = interaction.data.custom_id.split(':');
-    if (action === 'register') return handleRegisterButton(interaction, Number(sessionId));
-    if (action === 'unregister') return handleUnregisterButton(interaction, Number(sessionId));
+    switch (action) {
+      case 'register': return handleRegisterButton(interaction, Number(sessionId));
+      case 'unregister': return handleUnregisterButton(interaction, Number(sessionId));
+      // Setup panel: dropdowns setformat/settype/setlevel + details/finish buttons
+      case 'setformat':
+      case 'settype':
+      case 'setlevel':
+        return handleSetupSelect(interaction, Number(sessionId), action.slice(3), interaction.data.values?.[0]);
+      case 'details': return handleSetupDetails(interaction, Number(sessionId));
+      case 'finish': return handleSetupFinish();
+    }
   }
 
   if (interaction.type === MODAL_SUBMIT) {
     if (interaction.data.custom_id === 'session_create_modal') return handleSessionCreateModal(interaction);
     if (interaction.data.custom_id.startsWith('session_edit_modal:')) return handleSessionEditModal(interaction);
+    if (interaction.data.custom_id.startsWith('session_details_modal:')) return handleSessionDetailsModal(interaction);
   }
 
   return text(t('error_generic'));
@@ -109,10 +120,10 @@ async function handleSessionCreate(interaction) {
       // MJ is the invoker; description/comments etc. via /session edit.
       components: [
         row(textInput('system', t('field_system'), { placeholder: 'Cardenveil Layer 1' })),
-        row(textInput('format', t('field_format'), { placeholder: 'One shot / Two shot / Mini shot' })),
         row(textInput('date', t('field_date'), { placeholder: '2026-06-13 14:00 ou Samedi 13 Juin 2026 14:00' })),
         row(textInput('max_players', t('field_max_players'), { placeholder: '3' })),
         row(textInput('game_type', t('field_game_type'), { style: 2, placeholder: 'Boss fight / Bac à sable / Exploration...' })),
+        row(textInput('description', t('field_description'), { style: 2, required: false })),
       ],
     },
   };
@@ -204,10 +215,10 @@ async function handleSessionCreateModal(interaction) {
   const session = await db.createSession({
     mj_id: interaction.member.user.id,
     system: modalValue(interaction, 'system'),
-    format: modalValue(interaction, 'format'),
     date_timestamp: dateTimestamp,
     date_text: dateInput,
     game_type: modalValue(interaction, 'game_type'),
+    description: modalValue(interaction, 'description'),
     max_players: maxPlayers,
     status: 'recrutement',
   });
@@ -239,7 +250,18 @@ async function handleSessionCreateModal(interaction) {
   await scheduleReminders(session.id, dateTimestamp);
 
   const updated = await db.getSessionById(session.id);
-  return ephemeral({ content: t('session_created'), embeds: [await buildSessionEmbed(updated)] });
+
+  // Respond with the interactive setup panel: dropdowns (format/type/level)
+  // + details modal button. The session row in the DB is the wizard state.
+  return {
+    type: MESSAGE,
+    data: {
+      content: t('session_created'),
+      embeds: [await buildSessionEmbed(updated)],
+      components: buildSetupComponents(updated),
+      flags: 64,
+    },
+  };
 }
 
 async function createEventForSession(guildId, session) {
@@ -264,6 +286,106 @@ function buildEventDescription(session) {
   if (session.warnings) lines.push(`⚠️ ${session.warnings}`);
   if (session.description) lines.push(`\n${session.description}`);
   return lines.join('\n') || 'Session Cardenveil';
+}
+
+// ─── Setup panel (post-creation wizard) ────────────────────────────
+// Modals are capped at 5 inputs, so remaining fields are collected via
+// dropdowns on the ephemeral confirmation + a second "details" modal.
+// The session row in the DB is the wizard state — no draft storage needed.
+
+function selectMenu(customId, placeholder, options) {
+  return {
+    type: 3, // STRING_SELECT
+    custom_id: customId,
+    placeholder,
+    min_values: 1,
+    max_values: 1,
+    options: options.map(o => ({ label: o, value: o })),
+  };
+}
+
+function button(customId, label, style) {
+  return { type: 2, custom_id: customId, label, style };
+}
+
+function buildSetupComponents(session) {
+  return [
+    row(selectMenu(`setformat:${session.id}`, t('select_format'), ['One shot', 'Two shot', 'Mini shot'])),
+    row(selectMenu(`settype:${session.id}`, t('select_type'), ['En ligne', 'IRL', 'Mixte'])),
+    row(selectMenu(`setlevel:${session.id}`, t('select_level'), ['Débutant', 'Intermédiaire', 'Avancé'])),
+    {
+      type: 1,
+      components: [
+        button(`details:${session.id}`, t('setup_details_btn'), 2), // Primary
+        button(`finish:${session.id}`, t('setup_finish_btn'), 3),   // Success
+      ],
+    },
+  ];
+}
+
+async function handleSetupSelect(interaction, sessionId, field, value) {
+  const session = await db.getSessionById(sessionId);
+  if (!session) return text(t('session_not_found'));
+
+  await db.updateSession(sessionId, { [field]: value || null });
+  const updated = await db.getSessionById(sessionId);
+  await refreshAnnouncement(updated);
+
+  // Re-render the panel in place so the embed reflects the new value.
+  return {
+    type: UPDATE_MESSAGE,
+    data: {
+      content: t('session_created'),
+      embeds: [await buildSessionEmbed(updated)],
+      components: buildSetupComponents(updated),
+    },
+  };
+}
+
+async function handleSetupDetails(interaction, sessionId) {
+  const session = await db.getSessionById(sessionId);
+  if (!session) return text(t('session_not_found'));
+
+  return {
+    type: MODAL,
+    data: {
+      custom_id: `session_details_modal:${session.id}`,
+      title: `${t('session_details_title')} #${session.id}`.slice(0, 45),
+      components: [
+        row(textInput('duration', t('field_duration'), { required: false, value: session.duration || '', placeholder: '4h / 2 sessions / 2x 3h30' })),
+        row(textInput('platform', t('field_platform'), { required: false, value: session.platform || '', placeholder: 'Owlbear / Overlay Cardenveil' })),
+        row(textInput('warnings', t('field_warnings'), { required: false, value: session.warnings || '', placeholder: 'Violence, Psychologique, Torture' })),
+        row(textInput('tags', t('field_tags'), { required: false, value: session.tags || '', placeholder: '#Stratégique #Goofy #Epreuves' })),
+        row(textInput('comments', t('field_comments'), { style: 2, required: false, value: session.comments || '' })),
+      ],
+    },
+  };
+}
+
+async function handleSessionDetailsModal(interaction) {
+  const sessionId = Number(interaction.data.custom_id.split(':')[1]);
+  const session = await db.getSessionById(sessionId);
+  if (!session) return text(t('session_not_found'));
+
+  await db.updateSession(sessionId, {
+    duration: modalValue(interaction, 'duration'),
+    platform: modalValue(interaction, 'platform'),
+    warnings: modalValue(interaction, 'warnings'),
+    tags: modalValue(interaction, 'tags'),
+    comments: modalValue(interaction, 'comments'),
+  });
+
+  const updated = await db.getSessionById(sessionId);
+  await refreshAnnouncement(updated);
+
+  return ephemeral({
+    content: t('setup_updated'),
+    embeds: [await buildSessionEmbed(updated)],
+  });
+}
+
+async function handleSetupFinish() {
+  return { type: UPDATE_MESSAGE, data: { content: t('setup_done'), embeds: [], components: [] } };
 }
 
 // ─── Session edit modal ────────────────────────────────────────────

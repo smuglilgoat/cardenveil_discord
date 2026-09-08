@@ -14,6 +14,16 @@ const translations = {
     session_edit_title: '✏️ Modifier la Session',
     session_edited: '✅ Session #{id} modifiée avec succès !',
 
+    // Setup panel (post-creation wizard)
+    session_details_title: 'Détails de la Session',
+    setup_details_btn: '✏️ Détails supplémentaires',
+    setup_finish_btn: '✅ Terminer',
+    setup_done: '✅ Session configurée !',
+    setup_updated: '✅ Détails enregistrés.',
+    select_format: 'Format (One shot / Two shot / Mini shot)',
+    select_type: 'Type (En ligne / IRL / Mixte)',
+    select_level: "Niveau d'accessibilité",
+
     // Modal fields
     field_mj: 'MJ (mention Discord)',
     field_system: 'Système',
@@ -102,6 +112,16 @@ const translations = {
     // Session edit
     session_edit_title: '✏️ Edit Session',
     session_edited: '✅ Session #{id} edited successfully!',
+
+    // Setup panel (post-creation wizard)
+    session_details_title: 'Session Details',
+    setup_details_btn: '✏️ More details',
+    setup_finish_btn: '✅ Finish',
+    setup_done: '✅ Session configured!',
+    setup_updated: '✅ Details saved.',
+    select_format: 'Format (One shot / Two shot / Mini shot)',
+    select_type: 'Type (Online / IRL / Mixed)',
+    select_level: 'Accessibility level',
 
     // Modal fields
     field_mj: 'GM (Discord mention)',
