@@ -39,3 +39,4 @@
 ## [DISCOVERIES] — endpoint validation round
 - 2026-09-08 [TOOL] Portal URL validation failed. Probe of live endpoint: HTTP 502 "request.text is not a function" — named `handler` export made Netlify run functions in legacy (Lambda event) mode; v2 format requires DEFAULT export. Fixed both functions in 6db78dd (also makes `config.schedule` for reminders actually register). Verified locally (401 on fake signature) and live (endpoint now returns 401 Invalid signature instead of 502).
 - 2026-09-08 [USER] .env fully filled; client secret reset status UNCONFIRMED.
+- 2026-09-08 [CODE] Slash commands missing: local .env was the OLD gateway-era file (CLIENT_ID/GUILD_ID names, no DATABASE_URL, 22-char junk token) → deploy-commands aborted on missing DISCORD_APPLICATION_ID. Replaced with new-era .env (known IDs prefilled; token + DATABASE_URL await user paste from Netlify UI). /ping added (fd93d98).
