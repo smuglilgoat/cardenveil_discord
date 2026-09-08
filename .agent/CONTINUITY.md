@@ -35,3 +35,7 @@
 - 2026-09-08 [CODE] Fix commit ded9839: `git rm --cached session-ses_f7ed.md`, `session-*.md` added to .gitignore, ff-merged to main, pushed. Verified 0 flagged-value matches in HEAD. NOTE: local session file no longer on disk (regenerable via `opencode export`).
 - 2026-09-08 [USER] .env now fully filled (token + DB password non-empty) → user completed token reset + DB password steps.
 - 2026-09-08 [ASSUMPTION] Git history still contains the old token/Client Secret (dead after reset) and session file in d9eedc5 — harmless; history purge optional.
+
+## [DISCOVERIES] — endpoint validation round
+- 2026-09-08 [TOOL] Portal URL validation failed. Probe of live endpoint: HTTP 502 "request.text is not a function" — named `handler` export made Netlify run functions in legacy (Lambda event) mode; v2 format requires DEFAULT export. Fixed both functions in 6db78dd (also makes `config.schedule` for reminders actually register). Verified locally (401 on fake signature) and live (endpoint now returns 401 Invalid signature instead of 502).
+- 2026-09-08 [USER] .env fully filled; client secret reset status UNCONFIRMED.
