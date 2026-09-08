@@ -40,16 +40,19 @@ export async function createSession(data) {
     status: 'recrutement',
     description: null,
     comments: null,
+    forum_thread_id: null,
     ...nullify(data),
   };
   const rows = await getSql()`
     insert into sessions (
       mj_id, system, format, date_timestamp, date_text, duration, type, level,
-      platform, warnings, tags, game_type, max_players, status, description, comments
+      platform, warnings, tags, game_type, max_players, status, description, comments,
+      forum_thread_id
     ) values (
       ${d.mj_id}, ${d.system}, ${d.format}, ${d.date_timestamp}, ${d.date_text},
       ${d.duration}, ${d.type}, ${d.level}, ${d.platform}, ${d.warnings},
-      ${d.tags}, ${d.game_type}, ${d.max_players}, ${d.status}, ${d.description}, ${d.comments}
+      ${d.tags}, ${d.game_type}, ${d.max_players}, ${d.status}, ${d.description}, ${d.comments},
+      ${d.forum_thread_id}
     )
     returning *
   `;

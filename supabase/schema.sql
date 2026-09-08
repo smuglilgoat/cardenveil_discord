@@ -3,6 +3,7 @@
 create table if not exists sessions (
   id serial primary key,
   discord_event_id text,
+  forum_thread_id text,
   announcement_message_id text,
   announcement_channel_id text,
 

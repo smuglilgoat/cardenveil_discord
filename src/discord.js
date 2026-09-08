@@ -40,3 +40,7 @@ export const createScheduledEvent = (guildId, body) =>
 
 export const deleteScheduledEvent = (guildId, eventId) =>
   discordFetch(`/guilds/${guildId}/scheduled-events/${eventId}`, { method: 'DELETE' });
+
+// Create a thread (post) in a forum channel. Returns the thread channel.
+export const createForumThread = (forumChannelId, body) =>
+  discordFetch(`/channels/${forumChannelId}/threads`, { method: 'POST', body });

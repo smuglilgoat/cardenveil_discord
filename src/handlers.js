@@ -7,6 +7,7 @@ import {
   sendDm,
   createScheduledEvent,
   deleteScheduledEvent,
+  createForumThread,
 } from './discord.js';
 import { t } from './i18n.js';
 import { buildSessionEmbed, buildCalendarEmbed, buildRegistrationButtons } from './embeds.js';
@@ -82,6 +83,7 @@ export async function handleInteraction(interaction) {
       case 'setlevel':
         return handleSetupSelect(interaction, Number(sessionId), action.slice(3), interaction.data.values?.[0]);
       case 'details': return handleSetupDetails(interaction, Number(sessionId));
+      case 'publish': return handleSetupPublish(interaction, Number(sessionId));
       case 'finish': return handleSetupFinish();
     }
   }
@@ -232,18 +234,20 @@ async function handleSessionCreateModal(interaction) {
     }
   }
 
-  if (config.announcementChannelId) {
+  // One thread per session in the orga forum = the organization discussion space.
+  // The public announcement is NOT posted yet — the MJ publishes it via the
+  // "Publier l'annonce" button once the discussion is done.
+  if (config.forumChannelId) {
     try {
-      const message = await postMessage(config.announcementChannelId, {
-        embeds: [await buildSessionEmbed(session)],
-        components: buildRegistrationButtons(session),
+      const thread = await createForumThread(config.forumChannelId, {
+        name: `🎲 #${session.id} — ${session.system || 'Cardenveil'}`,
+        type: 11, // PUBLIC_THREAD
+        auto_archive_duration: 10080, // 7 days of inactivity
+        message: { embeds: [await buildSessionEmbed(session)] },
       });
-      await db.updateSession(session.id, {
-        announcement_message_id: message.id,
-        announcement_channel_id: message.channel_id,
-      });
+      await db.updateSession(session.id, { forum_thread_id: thread.id });
     } catch (err) {
-      console.error('Failed to post announcement:', err);
+      console.error('Failed to create forum thread:', err);
     }
   }
 
@@ -304,11 +308,12 @@ function selectMenu(customId, placeholder, options) {
   };
 }
 
-function button(customId, label, style) {
-  return { type: 2, custom_id: customId, label, style };
+function button(customId, label, style, disabled = false) {
+  return { type: 2, custom_id: customId, label, style, disabled };
 }
 
 function buildSetupComponents(session) {
+  const published = !!session.announcement_message_id;
   return [
     row(selectMenu(`setformat:${session.id}`, t('select_format'), ['One shot', 'Two shot', 'Mini shot'])),
     row(selectMenu(`settype:${session.id}`, t('select_type'), ['En ligne', 'IRL', 'Mixte'])),
@@ -316,11 +321,50 @@ function buildSetupComponents(session) {
     {
       type: 1,
       components: [
-        button(`details:${session.id}`, t('setup_details_btn'), 2), // Primary
-        button(`finish:${session.id}`, t('setup_finish_btn'), 3),   // Success
+        button(`publish:${session.id}`, t('setup_publish_btn'), 3, published),  // Success, disabled once published
+        button(`details:${session.id}`, t('setup_details_btn'), 2),             // Primary
+        button(`finish:${session.id}`, t('setup_finish_btn'), 4),               // Neutral
       ],
     },
   ];
+}
+
+async function handleSetupPublish(interaction, sessionId) {
+  const session = await db.getSessionById(sessionId);
+  if (!session) return text(t('session_not_found'));
+
+  if (!session.announcement_message_id) {
+    if (!config.announcementChannelId) return text(t('error_generic'));
+    try {
+      const threadLink = session.forum_thread_id
+        ? `https://discord.com/channels/${interaction.guild_id}/${session.forum_thread_id}`
+        : null;
+      const message = await postMessage(config.announcementChannelId, {
+        ...(threadLink && { content: `🧵 Discussion d'organisation : ${threadLink}` }),
+        embeds: [await buildSessionEmbed(session)],
+        components: buildRegistrationButtons(session),
+      });
+      await db.updateSession(session.id, {
+        announcement_message_id: message.id,
+        announcement_channel_id: message.channel_id,
+      });
+    } catch (err) {
+      console.error('Failed to publish announcement:', err);
+      return text(t('error_generic'));
+    }
+  }
+
+  const updated = await db.getSessionById(sessionId);
+  await refreshAnnouncement(updated);
+
+  return {
+    type: UPDATE_MESSAGE,
+    data: {
+      content: `${t('session_created')} ${t('setup_published')}`,
+      embeds: [await buildSessionEmbed(updated)],
+      components: buildSetupComponents(updated),
+    },
+  };
 }
 
 async function handleSetupSelect(interaction, sessionId, field, value) {

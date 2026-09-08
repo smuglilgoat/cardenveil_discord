@@ -6,6 +6,8 @@ export default {
   applicationId: process.env.DISCORD_APPLICATION_ID,
   guildId: process.env.DISCORD_GUILD_ID,
   announcementChannelId: process.env.ANNOUNCEMENT_CHANNEL_ID,
+  // Forum channel where per-session organization threads are created
+  forumChannelId: process.env.FORUM_CHANNEL_ID,
   databaseUrl: process.env.DATABASE_URL,
   mjRoleName: process.env.MJ_ROLE_NAME || 'MJ',
   language: process.env.LANGUAGE || 'fr',
