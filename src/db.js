@@ -22,14 +22,34 @@ const nullify = (data) =>
 // ─── Session Queries ───────────────────────────────────────────────
 
 export async function createSession(data) {
+  // All 16 columns must exist and be non-undefined — callers may omit optional fields.
+  const d = {
+    mj_id: null,
+    system: null,
+    format: null,
+    date_timestamp: null,
+    date_text: null,
+    duration: null,
+    type: null,
+    level: null,
+    platform: null,
+    warnings: null,
+    tags: null,
+    game_type: null,
+    max_players: null,
+    status: 'recrutement',
+    description: null,
+    comments: null,
+    ...nullify(data),
+  };
   const rows = await getSql()`
     insert into sessions (
       mj_id, system, format, date_timestamp, date_text, duration, type, level,
       platform, warnings, tags, game_type, max_players, status, description, comments
     ) values (
-      ${data.mj_id}, ${data.system}, ${data.format}, ${data.date_timestamp}, ${data.date_text},
-      ${data.duration}, ${data.type}, ${data.level}, ${data.platform}, ${data.warnings},
-      ${data.tags}, ${data.game_type}, ${data.max_players}, ${data.status}, ${data.description}, ${data.comments}
+      ${d.mj_id}, ${d.system}, ${d.format}, ${d.date_timestamp}, ${d.date_text},
+      ${d.duration}, ${d.type}, ${d.level}, ${d.platform}, ${d.warnings},
+      ${d.tags}, ${d.game_type}, ${d.max_players}, ${d.status}, ${d.description}, ${d.comments}
     )
     returning *
   `;
